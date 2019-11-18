@@ -28,8 +28,8 @@ import Data.Kind -- Type = (*)
 class OfKindType a
 
 instance OfKindType  Bool
-instance OfKindType  String         -- Which extension did we need
-instance OfKindType (Maybe (IO ())) -- to get /these/ to compile?
+instance OfKindType  String         -- Which extension did we need -XTypeSynonymInstances
+instance OfKindType (Maybe (IO ())) -- to get /these/ to compile?  -XFlexibleInstances
 
 {-
   We can start with an intuition that the 'Type' kind is inhabited by /things
@@ -63,7 +63,7 @@ instance OfKindType (Maybe (IO ())) -- to get /these/ to compile?
   The big problem here is that, in the absence of a better idea, GHC will
   assume that a typeclass parameter is of kind 'Type'. How do we tell it
   otherwise? We provide a kind signature! This is exactly what the extension
-  exists to do:
+  exists to do (-XKindSignatures):
 -}
 
 class OfKindTypeToType (a :: Type -> Type)
@@ -76,7 +76,7 @@ class OfKindTypeToType (a :: Type -> Type)
 
 instance OfKindTypeToType Maybe
 instance OfKindTypeToType []
-instance OfKindTypeToType (Either e) -- What is the kind of 'Either'?
+instance OfKindTypeToType (Either e) -- What is the kind of 'Either'? Type -> Type -> Type
 instance OfKindTypeToType ((,) a)
 instance OfKindTypeToType IO
 

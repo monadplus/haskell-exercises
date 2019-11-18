@@ -17,9 +17,11 @@ class SomeClass a
 
 instance SomeClass Bool
 instance SomeClass Int
--- instance SomeClass String
+--instance SomeClass String
 
 {-
+  nb. The error will not appear on cabal repl (probably because I have so many extensions enabled)
+
   If you uncomment that last one, you'll see that GHC gets upset. Specifically,
   it's upset because we are writing an instance for 'String', but 'String' is a
   type synonym for '[Char]'. However, it has a solution to suggest to us:
@@ -38,7 +40,7 @@ instance SomeClass Int
   actually need this extension explicitly.
 -}
 
--- instance SomeClass [Char]
+--instance SomeClass [Char]
 
 {-
   If you uncomment /this/ line, you'll see the error we saw with 'String' once

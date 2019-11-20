@@ -6,7 +6,7 @@
 and their uses. We're not going to go -} where {- Csongor's talk went, though
 there is plenty of further reading to be done if you're interested! -}
 
-import Data.Kind (Type)
+import Data.Kind (Type, Constraint)
 
 data Nat = Z | S Nat
 
@@ -25,7 +25,7 @@ add (S x) y = S (add x y)
 -}
 
 type family Add (x :: Nat) (y :: Nat) :: Nat where
-  Add  'Z    y = y
+  Add 'Z     y = y
   Add ('S x) y = 'S (Add x y)
 
 {-

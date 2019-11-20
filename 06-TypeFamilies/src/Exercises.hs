@@ -2,6 +2,8 @@
 {-# LANGUAGE GADTs         #-}
 {-# LANGUAGE TypeFamilies  #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeInType #-}
 module Exercises where
 
 import Data.Kind (Constraint, Type)
@@ -21,9 +23,16 @@ data Nat = Z | S Nat
 
 -- | a. Use the @TypeOperators@ extension to rewrite the 'Add' family with the
 -- name '+':
+type family (+) (x :: Nat) (y :: Nat) :: Nat where
+  Z + y = y
+  (S x) + y = S (x + y)
 
 -- | b. Write a type family '**' that multiplies two naturals using '(+)'. Which
--- extension are you being told to enable? Why?
+-- extension are you being told to enable? Why? -XUndeciableInstances
+type family (**) (x :: Nat) (y :: Nat) :: Nat where
+  Z ** _ = Z
+  -- m * n, add n to itself, m times.
+  (S x) ** y = y + (x ** y)
 
 data SNat (value :: Nat) where
   SZ :: SNat 'Z
@@ -31,7 +40,9 @@ data SNat (value :: Nat) where
 
 -- | c. Write a function to add two 'SNat' values.
 
-
+add' :: SNat n -> SNat m -> SNat (n + m)
+add' SZ y     = y
+add' (SS x) y = SS (add' x y)
 
 
 
@@ -43,16 +54,17 @@ data Vector (count :: Nat) (a :: Type) where
 
 -- | a. Write a function that appends two vectors together. What would the size
 -- of the result be?
-
--- append :: Vector m a -> Vector n a -> Vector ??? a
+appendV :: Vector m a -> Vector n a -> Vector (m + n) a
+appendV VNil v = v
+appendV (VCons a v1) v2 = VCons a (appendV v1 v2)
 
 -- | b. Write a 'flatMap' function that takes a @Vector n a@, and a function
 -- @a -> Vector m b@, and produces a list that is the concatenation of these
 -- results. This could end up being a deceptively big job.
 
--- flatMap :: Vector n a -> (a -> Vector m b) -> Vector ??? b
-flatMap = error "Implement me!"
-
+flatMap :: Vector n a -> (a -> Vector m b) -> Vector (n ** m) b
+flatMap VNil _ = VNil
+flatMap (VCons a v1) f = appendV (f a) (flatMap v1 f)
 
 
 
@@ -60,12 +72,20 @@ flatMap = error "Implement me!"
 {- THREE -}
 
 -- | a. More boolean fun! Write the type-level @&&@ function for booleans.
+type family (b1 :: Bool) && (b2 :: Bool) :: Bool where
+  'False && _ = 'False
+  'True && b2 = b2
 
 -- | b. Write the type-level @||@ function for booleans.
+type family (b1 :: Bool) || (b2 :: Bool) :: Bool where
+  'True  || _  = 'True
+  'False || b2 = b2
 
 -- | c. Write an 'All' function that returns @'True@ if all the values in a
 -- type-level list of boleans are @'True@.
-
+type family All (xs :: [Bool]) :: Bool where
+  All '[]       = 'True
+  All (b ': bs) = b && (All bs)
 
 
 
@@ -74,12 +94,33 @@ flatMap = error "Implement me!"
 
 -- | a. Nat fun! Write a type-level 'compare' function using the promoted
 -- 'Ordering' type.
+type family Compare (x :: Nat) (y :: Nat) :: Ordering where
+  Compare 'Z 'Z = 'EQ
+  Compare 'Z _ = 'LT
+  Compare _ 'Z = 'GT
+  Compare ('S n1) ('S n2) = Compare n1 n2
+
 
 -- | b. Write a 'Max' family to get the maximum of two natural numbers.
+type family Max (x :: Nat) (y :: Nat) :: Nat where
+  Max x y = Max' (Compare x y) x y
+
+type family Max' (ord :: Ordering) (x :: Nat) (y :: Nat) :: Nat where
+  Max' 'LT _ y = y
+  Max' _   x _ = x
 
 -- | c. Write a family to get the maximum natural in a list.
+type family Map (xs :: [a]) (f :: a -> b) :: [b] where
+  Map '[] _ = '[]
+  Map (a ': as) f = f a ': (Map as f)
 
+type family Foldl (f :: b -> a -> b) (b' :: b) (xs :: [a]) :: b where
+  Foldl _ b '[] = b
+  Foldl f b (a ': as) = Foldl f (f b a) as
 
+-- TODO: The type family ‘Max’ should have 2 arguments, but has been given none
+--type family MaxList (xs :: [Nat]) :: Nat where
+  --MaxList xs = Foldl Max 'Z xs
 
 
 

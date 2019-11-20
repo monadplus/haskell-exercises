@@ -2,11 +2,11 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE GADTs          #-}
 {-# LANGUAGE RankNTypes     #-}
+{-# LANGUAGE LambdaCase     #-}
 module Exercises where
 
 import Data.Kind (Type, Constraint)
-
-
+import Data.Maybe (fromMaybe)
 
 {- ONE -}
 
@@ -78,7 +78,7 @@ elimEqPair f (EqPair a a2) = f a a2
 -- | b. Write a function that takes a list of 'EqPair's and filters it
 -- according to some predicate on the unpacked values.
 filterEqPair :: (forall a. Eq a => a -> a -> Bool) -> [EqPair] -> [EqPair]
-filterEqPair f = filter (elimEqPair f)
+filterEqPair f = Prelude.filter (elimEqPair f)
 
 -- | c. Write a function that unpacks /two/ 'EqPair's. Now that both our
 -- variables are in rank-2 position, can we compare values from different
@@ -204,10 +204,25 @@ data MysteryBox a where
 -- | a. Knowing what we now know about RankNTypes, we can write an 'unwrap'
 -- function! Write the function, and don't be too upset if we need a 'Maybe'.
 
+-- | Removes one layer from a MysteryBox.
+unwrap :: MysteryBox a -> (forall a. MysteryBox a -> r) -> Maybe r
+unwrap EmptyBox _ = Nothing
+unwrap (IntBox _ box) f = Just (f box)
+unwrap (StringBox _ box) f = Just (f box)
+unwrap (BoolBox _ box) f = Just (f box)
+
 -- | b. Why do we need a 'Maybe'? What can we still not know?
+-- The box may be empty.
 
 -- | c. Write a function that uses 'unwrap' to print the name of the next
 -- layer's constructor.
+nextLayerName :: MysteryBox a -> String
+nextLayerName box = fromMaybe "Oops! Empty Box" $ unwrap box $ \case
+  -- Data.Data doesn't work for existential types.
+  EmptyBox        -> "EmptyBox"
+  (IntBox _ _)    -> "IntBox"
+  (StringBox _ _) -> "StringBox"
+  (BoolBox _ _)   -> "Boolbox"
 
 
 
@@ -218,6 +233,7 @@ data MysteryBox a where
 -- | When we talked about @DataKinds@, we briefly looked at the 'SNat' type:
 
 data Nat = Z | S Nat
+  deriving Eq
 
 data SNat (n :: Nat) where
   SZ :: SNat 'Z
@@ -226,24 +242,37 @@ data SNat (n :: Nat) where
 -- | We also saw that we could convert from an 'SNat' to a 'Nat':
 
 toNat :: SNat n -> Nat
-toNat = error "You should already know this one ;)"
+toNat SZ = Z
+toNat (SS n) = S (toNat n)
 
 -- | How do we go the other way, though? How do we turn a 'Nat' into an 'SNat'?
 -- In the general case, this is impossible: the 'Nat' could be calculated from
--- some user input, so we have no way of knowing what the 'SNat' type would be.
+-- some user input, so we have no way of knowing what the 'SNat' type would be (runtime vs compile time)
+
+--fromNat :: Nat -> SNat n
+--fromNat Z     = SZ
+--fromNat (S n) = SS (fromNat n :: SNat n)
+--
 -- However, if we could have a function that would work /for all/ 'SNat'
 -- values...
-
+--
 -- | Implement the 'fromNat' function. It should take a 'Nat', along with some
 -- SNat-accepting function (maybe at a higher rank?) that returns an @r@, and
 -- then returns an @r@. The successor case is a bit weird here - type holes
 -- will help you!
 
+fromNat
+  :: Nat
+  -> (forall n. SNat n -> r)
+  -> r
+fromNat Z f = f SZ
+fromNat (S nat) f = fromNat nat (f . SS)
+
 -- | If you're looking for a property that you could use to test your function,
 -- remember that @fromNat x toNat === x@!
 
-
-
+-- >>> let nat = S (S (S Z)) in fromNat nat toNat == nat
+-- True
 
 
 {- EIGHT -}
@@ -257,3 +286,15 @@ data Vector (n :: Nat) (a :: Type) where
 -- | It would be nice to have a 'filter' function for vectors, but there's a
 -- problem: we don't know at compile time what the new length of our vector
 -- will be... but has that ever stopped us? Make it so!
+filterV :: (a -> Bool) -> Vector n a -> (forall m. Vector m a -> r) -> r
+filterV _ VNil f        = f VNil
+filterV p (VCons a v) f = filterV p v (if p a then f . VCons a else f)
+
+-- >>> filterV even (VCons 2 (VCons 4 (VCons 6 ( VCons 8 VNil)))) lengthV
+-- 4
+-- filterV even (VCons 1 (VCons 1 (VCons 3 ( VCons 5 VNil)))) lengthV
+-- 0
+
+lengthV :: Vector n a -> Int
+lengthV VNil = 0
+lengthV (VCons _ v) = 1 + lengthV v

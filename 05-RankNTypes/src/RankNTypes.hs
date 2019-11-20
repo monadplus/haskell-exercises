@@ -117,7 +117,7 @@ wrapAny' f (x, y) = (f x, f y)
   saying that the function must work /for all/ types that we put in. Wait...
 -}
 
-wrapAnyNew :: (forall x. x -> f x) -> (a, b) -> (f a, f b)
+wrapAnyNew :: forall a b f. (forall x. x -> f x) -> (a, b) -> (f a, f b)
 wrapAnyNew f (x, y) = (f x, f y)
 
 {-
@@ -183,7 +183,7 @@ unpack (Showable a) = show a
   Or, we could generalise it to take any relevant function. What might the type
   look like, you ask? Exactly as we'd imagine:
 -}
-
+-- aka eliminator
 unpack' :: (forall a. Show a => a -> r) -> Showable -> r
 unpack' f (Showable x) = f x
 

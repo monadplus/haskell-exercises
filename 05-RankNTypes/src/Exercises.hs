@@ -4,9 +4,7 @@
 {-# LANGUAGE RankNTypes     #-}
 module Exercises where
 
-import Data.Kind (Type)
-
-
+import Data.Kind (Type, Constraint)
 
 
 
@@ -20,14 +18,16 @@ data Exlistential where
 
 -- | a. Write a function to "unpack" this exlistential into a list.
 
--- unpackExlistential :: Exlistential -> (forall a. a -> r) -> [r]
--- unpackExlistential = error "Implement me!"
+unpackExlistential :: Exlistential -> (forall a. a -> r) -> [r]
+unpackExlistential Nil _ = []
+unpackExlistential (Cons a as) f = f a : unpackExlistential as f
 
 -- | b. Regardless of which type @r@ actually is, what can we say about the
 -- values in the resulting list?
+-- That the values must be the same (or lifted, or a constant)
 
 -- | c. How do we "get back" knowledge about what's in the list? Can we?
-
+--  We can't. We need to add a constraint or remove the existential.
 
 
 
@@ -38,20 +38,29 @@ data Exlistential where
 -- (but, crucially, not the type inside).
 
 data CanFold a where
-  CanFold :: Foldable f => f a -> CanFold a
+  CanFold :: Foldable t => t a -> CanFold a
 
 -- | a. The following function unpacks a 'CanFold'. What is its type?
 
--- unpackCanFold :: ???
--- unpackCanFold f (CanFold x) = f x
+unpackCanFold :: (forall t. Foldable t => t a -> b) -> CanFold a -> b
+unpackCanFold f (CanFold x) = f x
 
 -- | b. Can we use 'unpackCanFold' to figure out if a 'CanFold' is "empty"?
 -- Could we write @length :: CanFold a -> Int@? If so, write it!
+lengthFold :: CanFold a -> Int
+lengthFold = unpackCanFold length
 
 -- | c. Write a 'Foldable' instance for 'CanFold'. Don't overthink it.
+instance Foldable CanFold where
+  --foldMap :: (a -> m) -> t a -> m
+  foldMap f (CanFold t) = foldMap f t
 
 
+data Has (c :: Type -> Constraint) where
+  Has :: c t => t -> Has c
 
+elimHas :: (forall t. c t => t -> r) -> Has c -> r
+elimHas f (Has t) = f t
 
 
 {- THREE -}
@@ -63,14 +72,21 @@ data EqPair where
 
 -- | a. Write a function that "unpacks" an 'EqPair' by applying a user-supplied
 -- function to its pair of values in the existential type.
+elimEqPair :: (forall a. Eq a => a -> a -> r) -> EqPair -> r
+elimEqPair f (EqPair a a2) = f a a2
 
 -- | b. Write a function that takes a list of 'EqPair's and filters it
 -- according to some predicate on the unpacked values.
+filterEqPair :: (forall a. Eq a => a -> a -> Bool) -> [EqPair] -> [EqPair]
+filterEqPair f = filter (elimEqPair f)
 
 -- | c. Write a function that unpacks /two/ 'EqPair's. Now that both our
 -- variables are in rank-2 position, can we compare values from different
 -- pairs?
-
+unpackEqPair :: Eq r => (forall a. Eq a => a -> a -> r) -> (EqPair, EqPair) -> Bool
+unpackEqPair f (p1, p2) = p1' == p2'
+  where p1' = elimEqPair f p1
+        p2' = elimEqPair f p2
 
 
 
@@ -97,13 +113,23 @@ data Nested input output subinput suboutput
 -- | a. Write a GADT to existentialise @subinput@ and @suboutput@.
 
 data NestedX input output where
-  -- ...
+  NestedX :: Nested input output subinput suboutput -> NestedX input output
 
 -- | b. Write a function to "unpack" a NestedX. The user is going to have to
 -- deal with all possible @subinput@ and @suboutput@ types.
+unpackNestedX
+  :: (forall subinput suboutput. Nested input output subinput suboutput -> r)
+  -> NestedX input output
+  -> r
+unpackNestedX f (NestedX nested) = f nested
 
 -- | c. Why might we want to existentialise the subtypes away? What do we lose
 -- by doing so? What do we gain?
+--
+-- If we can get from our parent input to the child input, and from the child
+-- output to the parent output, do we really care about the child inputs and
+-- outputs? Probably not - by existentialising them, we don't have to keep
+-- track of them in types.
 
 -- In case you're interested in where this actually turned up in the code:
 -- https://github.com/i-am-tom/purescript-panda/blob/master/src/Panda/Internal/Types.purs#L84
@@ -119,14 +145,14 @@ data NestedX input output where
 
 data FirstGo input output
   = FText String
-  | FHTML (String, String) [FirstGo input output]
+  | FHTML [(String, String)] [FirstGo input output]
   --       ^ properties     ^ children
 
 -- | This is fine, but there's an issue: some functions only really apply to
 -- 'FText' /or/ 'FHTML'. Now that this is a sum type, they'd have to result in
 -- a 'Maybe'! Let's avoid this by splitting this sum type into separate types:
 
-data Text = Text String
+--data Text = Text String
 -- data HTML = HTML { properties :: (String, String), children :: ??? }
 
 -- | Uh oh! What's the type of our children? It could be either! In fact, it
@@ -135,17 +161,34 @@ data Text = Text String
 class Renderable component where render :: component -> String
 
 -- | a. Write a type for the children.
+data RenderableX where
+  RenderableX :: Renderable component => component -> RenderableX
+
+data Text = Text String
+data HTML = HTML { properties :: [(String, String)], children :: [RenderableX]}
 
 -- | b. What I'd really like to do when rendering is 'fmap' over the children
 -- with 'render'; what's stopping me? Fix it!
+instance Renderable RenderableX where
+  render (RenderableX component) = render component
+
+instance Renderable Text where render (Text s) = s
+instance Renderable HTML where render (HTML _ children) = foldMap ((++ "\n") . render) children
+
+renderableExample :: IO ()
+renderableExample = putStr $ render html where
+    html = HTML [("width", "100%"), ("heigth", "80%")]
+                [RenderableX (Text "Hello"), RenderableX embedded, RenderableX (Text "World")]
+    embedded = HTML [("colour", "white")]
+                [RenderableX (Text "Frozen II")]
 
 -- | c. Now that we're an established Haskell shop, we would /also/ like the
 -- option to render our HTML to a Shakespeare template to write to a file
 -- (http://hackage.haskell.org/package/shakespeare). How could we support this
 -- new requirement with minimal code changes?
 
-
-
+-- You only need a new `class Shakespearable component where shakespeare :: component -> Shakespeare`
+-- , add it to the RenderableX constraints and create instances for Text and HTML
 
 
 {- SIX -}

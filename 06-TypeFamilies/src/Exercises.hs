@@ -7,6 +7,7 @@
 module Exercises where
 
 import Data.Kind (Constraint, Type)
+--import GHC.TypeLits (Nat)
 
 -- | Before we get started, let's talk about the @TypeOperators@ extension. All
 -- this does is allow us to write types whose names are operators, and write
@@ -130,16 +131,67 @@ data Tree = Empty | Node Tree Nat Tree
 
 -- | Write a type family to insert a promoted 'Nat' into a promoted 'Tree'.
 
+type family Insert (t :: Tree) (n :: Nat) :: Tree where
+  Insert 'Empty n      = 'Node 'Empty n 'Empty
+  Insert ('Node l c r) n = Insert' (Compare n c) ('Node l c r) n
 
-
-
+type family Insert' (ord :: Ordering) (t :: Tree) (n :: Nat) :: Tree where
+  Insert' 'EQ t _            = t
+  Insert' 'LT ('Node l c r) n = 'Node (Insert l n) c r
+  Insert' 'GT ('Node l c r) n = 'Node l c (Insert r n)
+-- >>> type Tree1 = 'Node ('Node 'Empty 3 'Empty) 5 ('Node 'Empty 8 'Empty)
+-- >>> :kind! Insert Tree1 7
 
 {- SIX -}
 
 -- | Write a type family to /delete/ a promoted 'Nat' from a promoted 'Tree'.
+type family Delete (t :: Tree) (n :: Nat) :: Tree where
+  Delete 'Empty        _ = 'Empty
+  Delete ('Node l c r) n = Delete' (Compare n c) ('Node l c r) n
 
+type family Delete' (ord :: Ordering) (t :: Tree) (n :: Nat) :: Tree where
+  Delete' 'LT ('Node l c r)      n = 'Node (Delete l n) c r
+  Delete' 'GT ('Node l c r)      n = 'Node l c (Delete r n)
+  Delete' 'EQ ('Node 'Empty _ r) _ = r
+  Delete' 'EQ ('Node l _ r)      n = Constr (Biggest l) r
 
+-- Reconstruct the Node from the largest value from the l and its tree.
+type family Constr (l :: (Nat, Tree)) (r :: Tree) :: Tree where
+  Constr '(c, l) r = 'Node l c r
 
+-- Find the largest node, remove the value and retrieve the tree.
+type family Biggest (t :: Tree) :: (Nat,Tree) where
+  Biggest ('Node l c 'Empty) = '(c, l)
+  -- Biggest value is on r
+  -- After we found it we must reconstruct the returning Tree.
+  Biggest ('Node l c r) = Constr' l c (Biggest r)
+
+type family Constr' (l :: Tree) (c :: Nat) (r :: (Nat, Tree)) :: (Nat, Tree) where
+  Constr' l c '(max, r) = '(max, ('Node l c r))
+
+-- We can use this type to write "tests" for the above. Any mention of Refl
+-- will force GHC to try to unify the two type parameters. If it fails, we get
+-- a type error!
+data (x :: Tree) :~: (y :: Tree) where
+  Refl :: x :~: x
+
+deleteTest0 :: Delete 'Empty 'Z :~: 'Empty
+deleteTest0 = Refl
+
+deleteTest1 :: Delete (Insert 'Empty 'Z) 'Z :~: 'Empty
+deleteTest1 = Refl
+
+deleteTest2 :: Insert (Insert 'Empty 'Z) 'Z :~: Insert 'Empty 'Z
+deleteTest2 = Refl
+
+deleteTest3
+   :: Insert (Insert 'Empty 'Z) ('S 'Z)
+  :~: 'Node 'Empty 'Z ('Node 'Empty ('S 'Z) 'Empty)
+deleteTest3 = Refl
+
+-- In case you're interested, here's a failing test!
+--deleteTest4 :: Insert 'Z 'Empty :~: 'Empty
+--deleteTest4 = Refl
 
 
 {- SEVEN -}

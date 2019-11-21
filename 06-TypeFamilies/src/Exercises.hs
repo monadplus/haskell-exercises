@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeInType #-}
 module Exercises where
 
+import Data.Monoid hiding (All)
 import Data.Kind (Constraint, Type)
 --import GHC.TypeLits (Nat)
 
@@ -146,34 +147,31 @@ type family Insert' (ord :: Ordering) (t :: Tree) (n :: Nat) :: Tree where
 
 -- | Write a type family to /delete/ a promoted 'Nat' from a promoted 'Tree'.
 type family Delete (t :: Tree) (n :: Nat) :: Tree where
-  Delete 'Empty        _ = 'Empty
+  Delete 'Empty _        = 'Empty
   Delete ('Node l c r) n = Delete' (Compare n c) ('Node l c r) n
 
 type family Delete' (ord :: Ordering) (t :: Tree) (n :: Nat) :: Tree where
-  Delete' 'LT ('Node l c r)      n = 'Node (Delete l n) c r
-  Delete' 'GT ('Node l c r)      n = 'Node l c (Delete r n)
-  Delete' 'EQ ('Node 'Empty _ r) _ = r
-  Delete' 'EQ ('Node l _ r)      n = Constr (Biggest l) r
+  Delete' 'LT ('Node l c r) n = 'Node (Delete l n) c r
+  Delete' 'GT ('Node l c r) n = 'Node l c (Delete r n)
+  Delete' 'EQ ('Node l c 'Empty) n = l
+  Delete' 'EQ ('Node l c r) n = Constr l (Smallest r)
 
--- Reconstruct the Node from the largest value from the l and its tree.
-type family Constr (l :: (Nat, Tree)) (r :: Tree) :: Tree where
-  Constr '(c, l) r = 'Node l c r
+type family Constr (l :: Tree) (r :: (Nat, Tree)) :: Tree where
+  Constr l '(c, r) = 'Node l c r
 
--- Find the largest node, remove the value and retrieve the tree.
-type family Biggest (t :: Tree) :: (Nat,Tree) where
-  Biggest ('Node l c 'Empty) = '(c, l)
-  -- Biggest value is on r
-  -- After we found it we must reconstruct the returning Tree.
-  Biggest ('Node l c r) = Constr' l c (Biggest r)
+type family Smallest (t :: Tree) :: (Nat, Tree) where
+  Smallest ('Node 'Empty c r) = '(c, r)
+  Smallest ('Node l c r) = Smallest' (Smallest l) c r
 
-type family Constr' (l :: Tree) (c :: Nat) (r :: (Nat, Tree)) :: (Nat, Tree) where
-  Constr' l c '(max, r) = '(max, ('Node l c r))
+type family Smallest' (l :: (Nat, Tree)) (c :: Nat) (r:: Tree) :: (Nat, Tree) where
+  Smallest' '(min, l) c r = '(min, 'Node l c r)
+
 
 -- We can use this type to write "tests" for the above. Any mention of Refl
 -- will force GHC to try to unify the two type parameters. If it fails, we get
 -- a type error!
-data (x :: Tree) :~: (y :: Tree) where
-  Refl :: x :~: x
+data (x :: a) :~: (y :: b) where
+  Refl :: a :~: a
 
 deleteTest0 :: Delete 'Empty 'Z :~: 'Empty
 deleteTest0 = Refl
@@ -205,8 +203,16 @@ data HList (xs :: [Type]) where
 
 -- | Write a function that appends two 'HList's.
 
+type family (xs :: [a]) ++ (ys :: [a]) :: [a] where
+  '[]       ++ ys = ys
+  (x ': xs) ++ ys = x ': (xs ++ ys)
 
-
+--Won't work
+--appendH :: HList xs -> HList ys -> HList zs
+--appendH = error ""
+appendH :: HList xs -> HList ys -> HList (xs ++ ys)
+appendH HNil ys = ys
+appendH (HCons x xs) ys = HCons x (appendH xs ys)
 
 
 {- EIGHT -}
@@ -228,15 +234,27 @@ type family CAppend (x :: Constraint) (y :: Constraint) :: Constraint where
 -- list of types, and builds a constraint on all the types.
 
 type family Every (c :: Type -> Constraint) (x :: [Type]) :: Constraint where
-  -- ...
+  Every  _ '[]       = ()
+  Every  c (t ': ts) = (c t, Every c ts)
 
 -- | b. Write a 'Show' instance for 'HList' that requires a 'Show' instance for
 -- every type in the list.
+instance (Every Show xs) => Show (HList xs) where
+  show HNil = "HNil"
+  show (HCons x xs) = "HCons(" ++ show x ++ "," ++ show xs ++ ")"
 
 -- | c. Write an 'Eq' instance for 'HList'. Then, write an 'Ord' instance.
 -- Was this expected behaviour? Why did we need the constraints?
+instance (Every Eq xs) => Eq (HList xs) where
+  HNil == HNil = True
+  (HCons x xs) == (HCons y ys) = x == y && xs == ys
+  -- HNil == (HCons _ _) = False -- redundant because '[] is not equal to x ': xs1
 
-
+-- HC can't /see/ a constraint that says any particular @x@ has an 'Ord' constraint,
+-- which means it can't convince itself that this will be true in the general case.
+instance (Every Eq xs, Every Ord xs) => Ord (HList xs) where
+  HNil `compare` HNil = EQ
+  (HCons x xs) `compare` (HCons y ys) = x `compare` y <> xs `compare` ys
 
 
 
@@ -244,7 +262,68 @@ type family Every (c :: Type -> Constraint) (x :: [Type]) :: Constraint where
 
 -- | a. Write a type family to calculate all natural numbers up to a given
 -- input natural.
+type family UpToN (n :: Nat) :: [Nat] where
+  UpToN 'Z = '[ 'Z  ]
+  UpToN ('S n) = (UpToN n) ++ '[ 'S n ]
+
+type family Drop (n :: Nat) (xs :: [Nat]) :: [Nat] where
+  Drop 'Z xs            = xs
+  Drop _ '[]            = '[]
+  Drop ('S n) (_ ': xs) = Drop n xs
 
 -- | b. Write a type-level prime number sieve.
 
+-- Source: https://wiki.haskell.org/Prime_numbers
+--primesTo m = sieve [2..m]
+             --where
+             --sieve (x:xs) = x : sieve (xs \\ [x,x+x..m])
+             --sieve [] = []
+
+type family Sieve (n :: Nat) :: [Nat] where
+  Sieve n = Sieve' (Drop N2 (UpToN n))
+
+type family Sieve' (xs :: [Nat]) :: [Nat] where
+  Sieve'       '[] = '[]
+  Sieve' (x ': xs) = x ': Sieve' (DropEveryN x xs)
+
+type family DropEveryN (n :: Nat) (xs :: [Nat]) :: [Nat] where
+  DropEveryN n xs = DropEveryN' n n xs
+
+type family DropEveryN' (x :: Nat) (n :: Nat) (xs :: [Nat]) :: [Nat] where
+  DropEveryN' _ _             '[] = '[]
+  DropEveryN' x ('S 'Z) ( _ ': xs) = DropEveryN' x x xs
+  DropEveryN' x ('S n) (x' ': xs) = x' ': (DropEveryN' x n xs)
+
+testDropEveryN :: DropEveryN N2 (UpToN N10) :~: '[ N0, N2, N4, N6, N8, N10 ]
+testDropEveryN = Refl
+
+type N0  = 'Z
+type N1  = 'S N0
+type N2  = 'S N1
+type N3  = 'S N2
+type N4  = 'S N3
+type N5  = 'S N4
+type N6  = 'S N5
+type N7  = 'S N6
+type N8  = 'S N7
+type N9  = 'S N8
+type N10 = 'S N9
+
+
+test :: Sieve N10 :~: '[ N2, N3, N5, N7 ]
+test = Refl
+
 -- | c. Why is this such hard work?
+
+-- Disclaimer: answer copied from the solutions
+
+-- I think it boils down to a few things:
+--
+-- * No let-binding at the type level.
+--
+-- * No higher-order functions - I can't write higher-order helpers without
+--   running into complaints about type families not having all their
+--   arguments. Recent work on unsaturated type families (type families without
+--   all their arguments) promises a solution to this, though!
+--
+-- * Syntax!

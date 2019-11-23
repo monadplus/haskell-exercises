@@ -98,7 +98,7 @@ type family Smuggler (x :: k) :: k where
 -}
 
 smuggle :: a -> a
--- smuggle (xs :: IO (Secrets, a)) = fmap snd xs
+--smuggle (xs :: IO (Secrets, a)) = fmap snd xs
 smuggle a                       = a
 
 {-

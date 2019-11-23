@@ -18,7 +18,7 @@ import Data.Kind (Type)
 
   The common thread between these is that the class defines a characteristic of
   a **single** type. 'Eq' tells us that /a type/ has a notion of equivalence.
-  'Show' tells us that /a type/ has a string representation. 
+  'Show' tells us that /a type/ has a string representation.
 
   Let's think about the rough idea behind the 'Show' class:
 -}
@@ -53,6 +53,7 @@ instance Transform Bool Int where
   you have):
 -}
 
+--instance {-# OVERLAPPABLE #-} Show x => Transform x String where
 instance Show x => Transform x String where
   transform = show
 
@@ -74,8 +75,8 @@ instance Show x => Transform x String where
   unit type, '()'.
 -}
 
-instance Transform () String where
-  transform _ = "UNIT"
+--instance Transform () String where
+  --transform _ = "UNIT"
 
 {-
   All good, but we get some ugly errors when we try to use it:
@@ -99,11 +100,13 @@ instance Transform () String where
   provides some language pragmas to help here - let's write a new instance:
 -}
 
+-- ghcid complains about it but ghc works fine.
 instance {-# OVERLAPPING #-} Transform String String where
   transform = id
 
-test2 :: String
-test2 = transform "hello"
+-- commented because ghcid is a pita
+--test2 :: String
+--test2 = transform "hello"
 
 {-
   @OVERLAPPING@ is how we tell GHC that, given the choice between this instance
@@ -179,7 +182,7 @@ test4 = transform [True] -- Prints A
      the choice isn't done according to some defined behaviour).
 
   4. If our winner is incoherent, we're done!
-  
+
   5. If not, find all the instances that /could/ match if we knew more*. If all
      these other instances are incoherent, return our winner! Otherwise, we've
      failed, and we don't know enough to decide :(
@@ -200,7 +203,7 @@ instance Sneaky Float Float where
 -}
 
 -- -- UNCOMMENT ME
--- huh = familiar (3.0 :: Float)
+--huh = familiar (3.0 :: Float)
 
 {-
   As we're starting to learn, GHC is actually pretty good at telling us what is
@@ -236,8 +239,8 @@ heh = familiar (3.0 :: Double)
 -}
 
 -- -- UNCOMMENT ME
--- instance {-# INCOHERENT #-} a ~ b => Sneaky a b where
---   familiar = id
+instance {-# INCOHERENT #-} a ~ b => Sneaky a b where
+  familiar = id
 
 {-
   Here's a scary-looking line of code, right? What we're saying here is, if you

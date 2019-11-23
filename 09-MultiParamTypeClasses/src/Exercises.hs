@@ -10,12 +10,18 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Exercises where
 
 import Data.Kind (Constraint, Type)
 import Data.Map (Map)
 import Data.Proxy (Proxy (..))
-
+import Control.Applicative (liftA2)
 
 
 
@@ -34,23 +40,46 @@ newtype YourInt = YourInt Int
 
 -- | a. Write the class!
 
--- class Newtype ... ... where
---   wrap   :: ...
---   unwrap :: ...
+--class Newtype a x where
+ --wrap   :: a   -> x a
+ --unwrap :: x a -> a
+class Newtype a b where
+ wrap   :: a -> b
+ unwrap :: b -> a
 
 -- | b. Write instances for 'MyInt' and 'YourInt'.
+instance Newtype Int MyInt where
+  wrap             = MyInt
+  unwrap (MyInt n) = n
+
+instance Newtype Int YourInt where
+  wrap             = YourInt
+  unwrap (YourInt n) = n
 
 -- | c. Write a function that adds together two values of the same type,
 -- providing that the type is a newtype around some type with a 'Num' instance.
+addNewtype :: forall a b. (Num a, Newtype a b) => Proxy a -> b -> b -> b
+addNewtype _ b1 b2 = wrap @a $ unwrap b1 + unwrap b2
 
 -- | d. We actually don't need @MultiParamTypeClasses@ for this if we use
 -- @TypeFamilies@. Look at the section on associated type instances here:
 -- https://wiki.haskell.org/GHC/Type_families#Associated_type_instances_2 -
 -- rewrite the class using an associated type, @Old@, to indicate the
 -- "unwrapped" type. What are the signatures of 'wrap' and 'unwrap'?
+class Newtype' a where
+  type Old a :: Type
+  wrap' :: a -> Old a
+  unwrap' :: Old a -> a
 
+instance {-# OVERLAPPING #-} Newtype' Int where
+  type Old Int = MyInt
+  wrap'             = MyInt
+  unwrap' (MyInt a) = a
 
-
+--instance [># OVERLAPPABLE #<] Newtype' Int where
+  --type Old Int = YourInt
+  --wrap'             = YourInt
+  --unwrap' (YourInt a) = a
 
 
 {- TWO -}
@@ -81,14 +110,38 @@ instance Traversable Identity where
 -- | a. Write that little dazzler! What error do we get from GHC? What
 -- extension does it suggest to fix this?
 
--- class Wanderable … … where
---   wander :: … => (a -> f b) -> t a -> f (t b)
+{-
+        Could not deduce: c0 f
+        from the context: (Wanderable c t, c f)
+          bound by the type signature for:
+            wander :: (Wanderable c t, c f) => (a -> f b) -> t a -> f (t b)
+
+        Enable -XAllowAmbiguousTypes
+        c f => is not directly used anywhere (it's actually used after applying f
+-}
+class Wanderable (c :: (Type -> Type) -> Constraint) (t :: Type -> Type) where
+ wander :: c f => (a -> f b) -> t a -> f (t b)
 
 -- | b. Write a 'Wanderable' instance for 'Identity'.
+--instance Wanderable Functor
+
+instance Wanderable Functor Identity where
+  wander f (Identity x) = Identity <$> f x
 
 -- | c. Write 'Wanderable' instances for 'Maybe', '[]', and 'Proxy', noting the
 -- differing constraints required on the @f@ type. '[]' might not work so well,
 -- and we'll look at /why/ in the next part of this question!
+
+instance Wanderable Applicative Maybe where
+  wander f (Just a) = Just <$> f a
+  wander _ Nothing = pure Nothing
+
+instance Wanderable Applicative Proxy where
+  wander _ _ = pure Proxy
+
+--instance Wanderable Applicative [] where
+  --wander f []       = pure []
+  --wander f (a : as) = liftA2 (:) (f a) (wander f as)
 
 -- | d. Assuming you turned on the extension suggested by GHC, why does the
 -- following produce an error? Using only the extensions we've seen so far, how
@@ -97,8 +150,14 @@ instance Traversable Identity where
 -- we'll see in later chapters that there are neater solutions to this
 -- problem!)
 
--- test = wander Just [1, 2, 3]
+class Wanderable' (c :: (Type -> Type) -> Constraint) (t :: Type -> Type) where
+ wander' :: c f => Proxy c -> (a -> f b) -> t a -> f (t b)
 
+instance Wanderable' Applicative [] where
+  wander' _ f []       = pure []
+  wander' p f (a : as) = liftA2 (:) (f a) (wander' p f as)
+
+test = wander' (Proxy :: Proxy Applicative) Just [1, 2, 3]
 
 
 
@@ -126,13 +185,22 @@ class (x :: Nat) < (y :: Nat) where
   convert :: SNat x -> Fin y
 
 -- | a. Write the instance that says @Z@ is smaller than @S n@ for /any/ @n@.
+instance 'Z < ('S n) where
+  convert SZ = FZ
 
 -- | b. Write an instance that says, if @x@ is smaller than @y@, then @S x@ is
 -- smaller than @S y@.
+instance (n < n') => ('S n) < ('S n') where
+  convert (SS n) = FS (convert n)
 
 -- | c. Write the inverse function for the class definition and its two
 -- instances.
-
+-- TODO: not sure what to do here.
+unconvert
+  :: x < y
+  => Fin y
+  -> SNat x
+unconvert = undefined
 
 
 
@@ -144,8 +212,11 @@ class (x :: Nat) < (y :: Nat) where
 -- instance.
 
 -- | a. Write that typeclass!
-
 -- | b. Write that instance!
+
+--UNCOMMENT
+--class a ~~ b where
+--instance a ~~ a where
 
 -- | c. When GHC sees @x ~ y@, it can apply anything it knows about @x@ to @y@,
 -- and vice versa. We don't have the same luxury with /our/ class, however –
@@ -154,10 +225,22 @@ class (x :: Nat) < (y :: Nat) where
 -- matter, though - we can just add two functions (@x -> y@ and @y -> x@) to
 -- our class to convert between the types. Write them, and don't overthink!
 
+class a ~~ b where
+  to  :: b -> a
+  from :: a -> b
+
+instance {-# OVERLAPPABLE #-} a ~~ a where
+  to = Prelude.id
+  from = Prelude.id
+
 -- | d. GHC can see @x ~ y@ and @y ~ z@, then deduce that @x ~ z@. Can we do
 -- the same? Perhaps with a second instance? Which pragma(s) do we need and
 -- why? Can we even solve this?
 
+-- TODO
+--instance {-# OVERLAPPING #-} (a ~~ b, b ~~ c) => a ~~ c where
+  --to = to . to
+  --from = from . from
 
 
 

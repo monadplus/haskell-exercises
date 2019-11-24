@@ -10,4 +10,5 @@ library
   hs-source-dirs:   src
   exposed-modules:  MultiParamTypeClasses
                   , Exercises
-
+  --default-extensions:  DerivingStrategies
+                     --, GeneralizedNewtypeDeriving

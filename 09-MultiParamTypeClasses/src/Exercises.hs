@@ -20,9 +20,11 @@ module Exercises where
 
 import Data.Kind (Constraint, Type)
 import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Proxy (Proxy (..))
 import Control.Applicative (liftA2)
-
+import GHC.TypeLits hiding (Nat)
+import Data.Foldable (toList)
 
 
 
@@ -250,8 +252,8 @@ instance {-# OVERLAPPABLE #-} a ~~ a where
 -- | It wouldn't be a proper chapter without an @HList@, would it?
 
 data HList (xs :: [Type]) where
-  -- In fact, you know what? You can definitely write an HList by now – I'll
-  -- just put my feet up and wait here until you're done!
+  HNil :: HList '[]
+  HCons :: x -> HList xs -> HList (x ': xs)
 
 -- | Consider the following class for taking the given number of elements from
 -- the front of an HList:
@@ -260,12 +262,16 @@ class HTake (n :: Nat) (xs :: [Type]) (ys :: [Type]) where
   htake :: SNat n -> HList xs -> HList ys
 
 -- | a. Write an instance for taking 0 elements.
+instance HTake 'Z xs '[] where
+  htake SZ _ = HNil
 
--- | b. Write an instance for taking a non-zero number. You "may" need a
--- constraint on this instance.
+-- | b. Write an instance for taking a non-zero number. You "may" need a constraint on this instance.
+instance (HTake n xs ys) => HTake ('S n) (x ': xs) (x ': ys) where
+  htake (SS n) (HCons x xs) = HCons x (htake n xs)
 
 -- | c. What case have we forgotten? How might we handle it?
-
+instance HTake n '[] '[] where
+  htake _ HNil = HNil
 
 
 
@@ -278,22 +284,40 @@ class Pluck (x :: Type) (xs :: [Type]) where
   pluck :: HList xs -> x
 
 -- | a. Write an instance for when the head of @xs@ is equal to @x@.
+instance Pluck x (x ': xs) where
+  pluck (HCons x xs) = x
 
 -- | b. Write an instance for when the head /isn't/ equal to @x@.
+-- nb. OVERLAPPABLE is enough for this instance but INCOHERENT gives better error msg.
+instance {-# INCOHERENT #-} (Pluck x xs) => Pluck x (z ': xs) where
+  pluck (HCons _ xs) = pluck xs
 
 -- | c. Using [the documentation for user-defined type
 -- errors](http://hackage.haskell.org/package/base-4.11.1.0/docs/GHC-TypeLits.html#g:4)
 -- as a guide, write a custom error message to show when you've recursed
 -- through the entire @xs@ list (or started with an empty @HList@) and haven't
 -- found the type you're trying to find.
+instance ( TypeError (     Text "Couldn't find type "
+                      :<>: ShowType x
+                      :<>: Text " in the HList."
+                     )
+         ) => Pluck x '[] where
+  pluck = error "unreachable"
+
 
 -- | d. Making any changes required for your particular HList syntax, why
 -- doesn't the following work? Hint: try running @:t 3@ in GHCi.
 
--- mystery :: Int
--- mystery = pluck (HCons 3 HNil)
+-- nb 3 is not Int, it's Num which it's not going to be found by Pluck.
+--mystery :: Int
+--mystery = pluck (HCons 3 HNil)
 
+-- UNCOMMENT to see the error msg.
+--mystery :: Int
+--mystery = pluck (HCons "name" (HCons (Just 3) HNil))
 
+mystery :: Int
+mystery = pluck (HCons "name" (HCons (3::Int) HNil))
 
 
 
@@ -303,26 +327,35 @@ class Pluck (x :: Type) (xs :: [Type]) where
 -- number of parameters. Typically, we define it with two parameters: @Here@
 -- and @There@. These tell us which "position" our value inhabits:
 
--- variants :: [Variant '[Bool, Int, String]]
--- variants = [ Here True, There (Here 3), There (There (Here "hello")) ]
+variants :: [Variant '[Bool, Int, String]]
+variants = [ Here True, There (Here 3), There (There (Here "hello")) ]
 
 -- | a. Write the 'Variant' type to make the above example compile.
 
 data Variant (xs :: [Type]) where
-  -- Here  :: ...
-  -- There :: ...
+  Here  :: x -> Variant (x ': xs)
+  There :: Variant xs -> Variant (x ': xs)
 
 -- | b. The example is /fine/, but there's a lot of 'Here'/'There' boilerplate.
 -- Wouldn't it be nice if we had a function that takes a type, and then returns
 -- you the value in the right position? Write it! If it works, the following
 -- should compile: @[inject True, inject (3 :: Int), inject "hello"]@.
 
--- class Inject … … where
---   inject :: …
+class Inject (x :: Type) (xs :: [Type]) where
+  inject :: x -> Variant xs
+
+instance Inject x (x ': xs) where
+  inject = Here
+
+instance {-# INCOHERENT #-} Inject x xs => Inject x (z ': xs) where
+  inject = There . inject
+
+test2 :: [ Variant '[Bool, Int, String] ]
+test2 = [ inject True, inject (3 :: Int), inject ("hello"::String) ]
 
 -- | c. Why did we have to annotate the 3? This is getting frustrating... do
 -- you have any (not necessarily good) ideas on how we /could/ solve it?
-
+-- TODO
 
 
 
@@ -359,16 +392,17 @@ class Coat (a :: Weather) (b :: Temperature) where
 -- that /everyone/ knows, so they should be safe enough!
 
 -- No one needs a coat when it's sunny!
-instance Coat Sunny b where doINeedACoat _ _ = False
+--instance Coat 'Sunny b where doINeedACoat _ _ = False
 
 -- It's freezing out there - put a coat on!
-instance Coat a Cold where doINeedACoat _ _ = True
+--instance Coat a 'Cold where doINeedACoat _ _ = True
 
 -- | Several months pass, and your app is used by billions of people around the
 -- world. All of a sudden, your engineers encounter a strange error:
 
--- test :: Bool
--- test = doINeedACoat SSunny SCold
+--test3 :: Bool
+--test3 = doINeedACoat SSunny SCold
+
 
 -- | Clearly, our data scientists never thought of a day that could
 -- simultaneously be sunny /and/ cold. After months of board meetings, a
@@ -379,14 +413,25 @@ instance Coat a Cold where doINeedACoat _ _ = True
 -- to prioritise the second rule. Why didn't that work? Which step of the
 -- instance resolution process is causing the failure?
 
+-- Coat 'Sunny b is more specific than 'Sunny a Cold for the type SSuny SCold
+
+--instance [># overlappable #<] coat 'sunny b where doineedacoat _ _ = false
+--instance [># OVERLAPPING #<] Coat a 'Cold where doINeedACoat _ _ = True
+
 -- | b. Consulting the instance resolution steps, which pragma /could/ we use
 -- to solve this problem? Fix the problem accordingly.
+instance {-# INCOHERENT #-} Coat 'Sunny b where doINeedACoat _ _ = False
+instance Coat a 'Cold where doINeedACoat _ _ = True
+
+test3 :: Bool
+test3 = doINeedACoat SSunny SCold
+-- >>> test3
+-- True
 
 -- | c. In spite of its scary name, can we verify that our use of it /is/
 -- undeserving of the first two letters of its name?
 
-
-
+-- The resolution is coherent because there is only incoherent instances which make the resolution deterministic.
 
 
 {- NINE -}
@@ -399,10 +444,15 @@ instance Coat a Cold where doINeedACoat _ _ = True
 
 -- | a. Are these in conflict? When?
 
+-- For Show [Char].
+
 -- | b. Let's say we want to define an instance for any @f a@ where the @f@ is
 -- 'Foldable', by converting our type to a list and then showing that. Is there
 -- a pragma we can add to the first 'Show' instance above so as to preserve
 -- current behaviour? Would we need /more/ pragmas than this?
+
+instance {-# OVERLAPPABLE #-} (Foldable f, Show a) => Show (f a) where
+  show = show . toList
 
 -- | c. Somewhat confusingly, we've now introduced incoherence: depending on
 -- whether or not I've imported this module, 'show' will behave in different
@@ -410,6 +460,8 @@ instance Coat a Cold where doINeedACoat _ _ = True
 -- here, but they are missing the bigger issue; what have we done? How could we
 -- have avoided it?
 
+-- The issue is the orphan instance.
+-- Wrapping the Foldable Show in a newtype.
 
 
 
@@ -451,15 +503,36 @@ class CommentCache where
 -- | "This is silly", you exclaim. "These classes only differ in three ways! We
 -- could write this as a multi-parameter type class!"
 
+
 -- | a. What are those three ways? Could we turn them into parameters to a
 -- typeclass? Do it!
+class Cache (a :: Type) (id :: Type) (f :: Type -> Type) where
+  store :: a -> Map id a -> Map id a
+  load  :: Map id a -> id -> f a
+
+--instance Cache User UserId (Either Status) where
+  --store = undefined
+  --load = undefined
+
+--instance Cache Comment CommentId Maybe where
+  --store = undefined
+  --load = undefined
 
 -- | b. Write instances for 'User' and 'Comment', and feel free to implement
 -- them as 'undefined' or 'error'. Now, before uncommenting the following, can
 -- you see what will go wrong? (If you don't see an error, try to call it in
 -- GHCi...)
 
--- oops cache = load cache (UserId (123 :: Int))
+oops cache = load cache (UserId (123 :: Int))
+-- We don't know which instance to pick based solely on the fact that it's a
+-- UserId!
 
 -- | c. Do we know of a sneaky trick that would allow us to fix this? Possibly
 -- involving constraints? Try!
+instance (value ~ User, f ~ Either Status) => Cache value UserId f where
+  store = undefined
+  load = undefined
+
+instance (value ~ Comment, f ~ Maybe) => Cache value CommentId f where
+  store = undefined
+  load = undefined

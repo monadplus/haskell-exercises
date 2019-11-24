@@ -11,7 +11,7 @@
 module Exercises where
 
 import Data.Kind (Type)
-import GHC.TypeLits (Symbol)
+import GHC.TypeLits hiding (Nat(..))
 import GHC.Generics (Generic (..))
 import qualified GHC.Generics as G
 
@@ -23,14 +23,17 @@ import qualified GHC.Generics as G
 
 -- | Recall an old friend, the 'Newtype' class:
 
-class Newtype (new :: Type) (old :: Type) where
+--class Newtype (new :: Type) (old :: Type) where
+  --wrap   :: old -> new
+  --unwrap :: new -> old
+
+-- | a. Can we add a functional dependency to this class?
+class Newtype (new :: Type) (old :: Type) | new -> old where
   wrap   :: old -> new
   unwrap :: new -> old
 
--- | a. Can we add a functional dependency to this class?
-
 -- | b. Why can't we add two?
-
+-- Why would we want that ?? It's useful to have several newtypes for the same base type.
 
 
 
@@ -40,20 +43,31 @@ class Newtype (new :: Type) (old :: Type) where
 -- | Let's go back to a problem we had in the last exercise, and imagine a very
 -- simple cache in IO. Uncomment the following:
 
--- class CanCache (entity :: Type) (index :: Type) where
---   store :: entity -> IO ()
---   load  :: index -> IO (Maybe entity)
+--class CanCache (entity :: Type) (index :: Type) where
+ --store :: entity -> IO ()
+ --load  :: index -> IO (Maybe entity)
 
 -- | a. Uh oh - there's already a problem! Any @entity@ type should have a
 -- fixed type of id/@index@, though... if only we could convince GHC... Could
 -- you have a go?
 
+--class CanCache (entity :: Type) (index :: Type) | entity -> index where
+ --store :: entity -> IO ()
+ --load  :: index -> IO (Maybe entity)
+
 -- | b. @IO@ is fine, but it would be nice if we could choose the functor when
 -- we call @store@ or @load@... can we parameterise it in some way?
+
+class CanCache (entity :: Type) (index :: Type) (f :: Type -> Type)
+  | entity -> index where
+ store :: entity -> f ()
+ load  :: index -> f (Maybe entity)
 
 -- | c. Is there any sort of functional dependency that relates our
 -- parameterised functor to @entity@ or @index@? If so, how? If not, why not?
 
+-- You could add one but it's better to leave the choice free.
+-- For example, you may want to use one functor for pro and another for testing.
 
 
 
@@ -80,16 +94,23 @@ type family Add' (x :: Nat) (y :: Nat)    :: Nat
 -- pattern-matching on the first argument. Remember that instances can have
 -- constraints, and this is how we do recursion!
 
+instance Add 'Z n n
+instance (Add n m l) => Add ('S n) m ('S l)
+
 -- | b. By our analogy, a type family has only "one functional dependency" -
 -- all its inputs to its one output. Can we write _more_ functional
--- dependencies for @Add@? Aside from @x y -> z@? 
+-- dependencies for @Add@? Aside from @x y -> z@?
+
+-- y x -> z -- Commutative
 
 -- | c. We know with addition, @x + y = z@ implies @y + x = z@ and @z - x = y@.
 -- This should mean that any pair of these three variables should determine the
 -- other! Why couldn't we write all the possible functional dependencies that
 -- /should/ make sense?
 
-
+-- We can't express the functional dependency z - x = y. The following are not equivalent to the previous property.
+-- z x -> y
+-- z y -> x
 
 
 {- FOUR -}
@@ -100,8 +121,8 @@ data Proxy (a :: k) = Proxy
 -- because the names of types are far too confusing. To that end, we can give
 -- our types friendlier names to make the coding experience less intimidating:
 
-class (x :: k) `IsNamed` (label :: Symbol) where
-  fromName :: Proxy x     -> Proxy label
+class (x :: k) `IsNamed` (label :: Symbol) | x -> label where
+  fromName :: Proxy x   -> Proxy label
   fromName _ = Proxy
 
   toName :: Proxy label -> Proxy x
@@ -110,6 +131,7 @@ class (x :: k) `IsNamed` (label :: Symbol) where
 -- | Now we have this class, we can get to work!
 
 instance Int   `IsNamed` "Dylan"
+--instance Int   `IsNamed` "Nathan"
 instance IO    `IsNamed` "Barbara"
 instance Float `IsNamed` "Kenneth"
 
@@ -118,32 +140,50 @@ instance Float `IsNamed` "Kenneth"
 -- Is there a way to get GHC to help us uphold the law?
 
 -- | b. Write the identity function restricted to types named "Kenneth".
+id' :: (a `IsNamed` "Kenneth") => a -> a
+id' = id
 
 -- | c. Can you think of a less-contrived reason why labelling certain types
 -- might be useful in real-world code?
 
+-- 1. Authenticated resources
 
+-- It might be useful, for example, if we want to produce some sort of
+-- language-independent description of data structures. If our description (for
+-- example, postgres, or some IDL) refers to "Number", we might want to link
+-- that in some way to 'Double'.
 
 
 
 {- FIVE -}
 
 -- | Here's a fun little class:
-class Omnipresent (r :: Symbol)
+--class Omnipresent (r :: Symbol)
 
 -- | Here's a fun little instance:
-instance Omnipresent "Tom!"
+--instance Omnipresent "Tom!"
 
 -- | a. Is there a way to enforce that no other instance of this class can ever
 -- exist? Do we /need/ variables on the left-hand side of a functional
 -- dependency arrow?
 
+--class Omnipresent (r :: Symbol) | -> r
+--instance Omnipresent "Tom!"
+--instance Omnipresent "John!"
+
 -- | b. Can you think of a time you would ever want this guarantee? Is this
 -- "trick" something you can think of a practical reason for doing? Perhaps if
 -- we added a method to the class? (Very much an open question).
 
+-- Not now...
+-- A useful method could be unlifting the Symbol to the value level.
+
 -- | c. Add another similarly-omnipresent parameter to this type class.
 
+class Omnipresent (r :: Symbol) (s :: Symbol) | -> r s
+instance Omnipresent "Tom" "Riddle"
+--instance Omnipresent "Tom" "Rddl"
+--instance Omnipresent "To" "Rddle"
 
 
 
@@ -163,14 +203,50 @@ data SNat (n :: Nat) where
 -- | a. Write a function (probably in a class) that takes an 'SNat' and an
 -- 'HList', and returns the value at the 'SNat''s index within the 'HList'.
 
+class HIndex (ts :: [Type]) (n :: Nat) (v :: Type) | ts n -> v where
+  (!!!) :: HList ts -> SNat n -> v
+
+instance HIndex (x ': xs) 'Z x where
+  (!!!) (HCons x _) SZ = x
+
+instance (HIndex xs n x) => HIndex (z ': xs) ('S n) x where
+  (!!!) (HCons _ xs) (SS n) = xs !!! n
+
+instance ( TypeError
+           ( Text "Index out of bounds."
+           )
+         ) => HIndex '[] n () where
+           (!!!) = undefined
+
+-- >>> xs = HCons ("hello"::String) (HCons (1::Int) HNil)
+-- >>> xs !!! SZ
+-- "hello"
+-- >>> xs !!! (SS SZ)
+-- 1
+-- >>> xs !!! (SS (SS SZ))
+-- error "Index out of bounds".
+
 -- | b. Add the appropriate functional dependency.
 
 -- | c. Write a custom type error!
 
 -- | d. Implement 'take' for the 'HList'.
+class Take (n :: Nat) (ts :: [Type]) (rs :: [Type]) | ts n -> rs where
+  htake :: SNat n -> HList ts -> HList rs
 
+instance Take 'Z xs '[] where
+  htake SZ _  = HNil
 
+instance (Take n xs rs) => Take ('S n) (x ': xs) (x ': rs) where
+  htake (SS n) (HCons x xs) = HCons x (htake n xs)
 
+-- >>> xs = HCons ("hello"::String) (HCons (1::Int) HNil)
+-- >>> htake SZ xs
+-- HNil
+-- >>> htake (SS SZ) xs
+-- HCons "hello" HNil
+-- >>> htake (SS (SS SZ)) xs
+-- >>> htake (SS (SS (SS SZ))) xs
 
 
 {- SEVEN -}
@@ -256,11 +332,11 @@ instance GNameOf (G.D1 ('G.MetaData name a b c) d) name
 --
 -- liftA1 :: Applicative f => (a -> b) -> f a -> f b
 -- liftA1 = lift
--- 
+--
 -- liftA2 :: Applicative f => (a -> b -> c) -> f a -> f b -> f c
 -- liftA2 = lift
 --
--- 
+--
 -- liftA3 :: Applicative f => (a -> b -> c -> d) -> f a -> f b -> f c -> f d
 -- liftA3 = lift
 

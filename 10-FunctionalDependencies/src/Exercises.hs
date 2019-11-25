@@ -12,9 +12,8 @@ module Exercises where
 
 import Data.Kind (Type)
 import GHC.TypeLits hiding (Nat(..))
-import GHC.Generics (Generic (..))
+import GHC.Generics (Generic (..), (:+:), (:*:))
 import qualified GHC.Generics as G
-
 
 
 
@@ -265,8 +264,8 @@ class Inject (x :: Type) (xs :: [Type]) where
 instance Inject x (x ': xs) where
   inject = Here
 
-instance {-# OVERLAPPING #-} Inject x xs
-    => Inject x (y ': xs) where
+-- OVERLAPPABLE doesn't work.
+instance {-# INCOHERENT #-} Inject x xs => Inject x (z ': xs) where
   inject = There . inject
 
 -- | Write a function to "project" a value /out of/ a variant. In other words,
@@ -279,9 +278,21 @@ instance {-# OVERLAPPING #-} Inject x xs
 --     === Left Bool :: Either Bool (Variant '[Int, String])
 -- @
 
+class Project (x :: Type) (xs :: [Type]) (rs :: [Type]) where
+  project :: Proxy x -> Variant xs -> Either x (Variant rs)
 
+instance Project x (x ': xs) xs where
+  project _ (Here x)   = Left x
+  project _ (There xs) = error "Impossible" -- Right xs -- This will only happens when the Variant is wrong.
 
+instance (Project x xs rs) => Project x (z ': xs) (z ': rs) where
+  project _ (Here _)   = error "Impossible!"
+  project p (There xs) = There <$> project p xs
 
+-- >>> project (Exercises.Proxy :: Exercises.Proxy Bool) (inject True :: Variant '[Int, String, Bool])
+-- Left Bool :: Either Bool (Variant '[Int, String])
+-- >>> project (Exercises.Proxy :: Exercises.Proxy String) (inject True :: Variant '[Int, String, Bool])
+-- Right ...
 
 {- EIGHT -}
 
@@ -295,9 +306,16 @@ instance {-# OVERLAPPING #-} Inject x xs
 
 -- | Write the type class required to implement this function, along with all
 -- its instances and functional dependencies.
+--class Update (n :: Nat) (f :: Type -> Type) (a :: Type) (xs :: [Type]) (rs :: [Type])
+class Update (n :: Nat) (a :: Type) (b :: Type) (xs :: [Type]) (rs :: [Type]) | n a b xs -> rs where
+  update :: SNat n -> (a -> b) -> HList xs -> HList rs
 
+instance Update 'Z x y (x ': xs) (y ': xs) where
+  update SZ f (HCons x xs) = HCons (f x) xs
 
-
+instance {-# INCOHERENT #-} Update n a b xs ys => Update ('S n) a b (x ': xs) (x ': ys) where
+  update (SS n) f (HCons x xs) = HCons x (update n f xs)
+-- >>> update SZ (length :: String -> Int) (HCons True (HCons ("Hello"::String) HNil))
 
 
 {- NINE -}
@@ -312,6 +330,7 @@ instance {-# OVERLAPPING #-} Inject x xs
 
 class NameOf (x :: Type) (name :: Symbol) | x -> name
 instance GNameOf (Rep x) name => NameOf x name
+-- >>> foo :: (NameOf Int s, KnownSymbol s) => IO (); foo = print $ symbolVal (Proxy @s)
 
 -- | We then have to implement this class that examines the generic tree...
 class GNameOf (rep :: Type -> Type) (name :: Symbol) | rep -> name
@@ -319,10 +338,21 @@ instance GNameOf (G.D1 ('G.MetaData name a b c) d) name
 
 -- | Write a function to get the names of the constructors of a type as a
 -- type-level list of symbols.
+class ConstructorsOf (x :: Type) (names :: [Symbol]) | x -> names
+instance GConstructorsOf (Rep x) names => ConstructorsOf x names
 
+class GConstructorsOf (rep :: Type -> Type) (names :: [Symbol]) | rep -> names
+-- Data Type constructor
+instance GConstructorsOf inner name => GConstructorsOf (G.D1 meta inner) name
+-- Constructor
+instance GConstructorsOf (G.C1 ('G.MetaCons name x y) a) '[name]
+-- Product constructors.
+instance (GConstructorsOf l lNames, GConstructorsOf r rNames, Concat lNames rNames names)
+  => GConstructorsOf (l :*: r) names
 
-
-
+class Concat (xs :: [k]) (ys :: [k]) (zs :: [k]) | xs ys -> zs
+instance Concat '[] ys ys
+instance Concat xs ys zs => Concat (x ': xs) ys (x ': zs)
 
 {- TEN -}
 
@@ -330,22 +360,22 @@ instance GNameOf (G.D1 ('G.MetaData name a b c) d) name
 -- 'liftA2', 'liftA3', 'liftA4'... wouldn't it be nice if we just had /one/
 -- function called 'lift' that generalised all these?
 --
--- liftA1 :: Applicative f => (a -> b) -> f a -> f b
--- liftA1 = lift
+liftA1 :: Applicative f => (a -> b) -> f a -> f b
+liftA1 = lift
 --
--- liftA2 :: Applicative f => (a -> b -> c) -> f a -> f b -> f c
--- liftA2 = lift
+liftA2 :: Applicative f => (a -> b -> c) -> f a -> f b -> f c
+liftA2 = lift
 --
 --
--- liftA3 :: Applicative f => (a -> b -> c -> d) -> f a -> f b -> f c -> f d
--- liftA3 = lift
+liftA3 :: Applicative f => (a -> b -> c -> d) -> f a -> f b -> f c -> f d
+liftA3 = lift
 
 -- Write this function, essentially generalising the f <$> a <*> b <*> c...
 -- pattern. It may help to see it as pure f <*> a <*> b <*> c..., and start
 -- with a function like this:
 
--- lift :: (Applicative f, Lift f i o) => i -> o
--- lift = lift' . pure
+lift :: (Applicative f, Lift f i o) => i -> o
+lift = lift' . pure
 
 -- @class Lift f i o ... where lift' :: ...@ is your job! If you get this
 -- right, perhaps with some careful use of @INCOHERENT@, equality constraints,
@@ -354,3 +384,13 @@ instance GNameOf (G.D1 ('G.MetaData name a b c) d) name
 --
 -- >>> :t lift (++)
 -- lift (++) :: Applicative f => f [a] -> f [a] -> f [a]
+
+class Lift (f :: Type -> Type) (i :: Type) (o :: Type) | f i -> o, o -> f where
+  lift' :: f i -> o
+
+instance (Applicative f, Lift f b o', o ~ (f a -> o'))
+  => Lift f (a -> b) o where
+    lift' fs xs = lift' (fs <*> xs)
+
+instance {-# INCOHERENT #-} Applicative f => Lift f a (f a) where
+  lift' = id

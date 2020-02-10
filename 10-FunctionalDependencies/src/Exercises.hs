@@ -93,8 +93,8 @@ type family Add' (x :: Nat) (y :: Nat)    :: Nat
 -- pattern-matching on the first argument. Remember that instances can have
 -- constraints, and this is how we do recursion!
 
-instance Add 'Z n n
-instance (Add n m l) => Add ('S n) m ('S l)
+instance Add 'Z y y
+instance (Add x y z) => Add ('S x) y ('S z)
 
 -- | b. By our analogy, a type family has only "one functional dependency" -
 -- all its inputs to its one output. Can we write _more_ functional
@@ -230,23 +230,26 @@ instance ( TypeError
 -- | c. Write a custom type error!
 
 -- | d. Implement 'take' for the 'HList'.
-class Take (n :: Nat) (ts :: [Type]) (rs :: [Type]) | ts n -> rs where
-  htake :: SNat n -> HList ts -> HList rs
+class Take (is :: [Type]) (n :: Nat) (os :: [Type]) | is n -> os where
+  htake :: SNat n -> HList is -> HList os
 
-instance Take 'Z xs '[] where
-  htake SZ _  = HNil
+instance Take is 'Z '[] where
+  htake SZ _ = HNil
 
-instance (Take n xs rs) => Take ('S n) (x ': xs) (x ': rs) where
+instance Take '[] n '[] where
+  htake _ HNil = HNil
+
+instance (Take is n os)
+    => Take (x ': is) ('S n) (x ': os) where
   htake (SS n) (HCons x xs) = HCons x (htake n xs)
 
--- >>> xs = HCons ("hello"::String) (HCons (1::Int) HNil)
--- >>> htake SZ xs
--- HNil
--- >>> htake (SS SZ) xs
--- HCons "hello" HNil
--- >>> htake (SS (SS SZ)) xs
--- >>> htake (SS (SS (SS SZ))) xs
-
+-- >>> let hlist = HCons True (HCons "hello" (HCons (1::Int) HNil))
+--
+-- >>> let hlist2 = htake (SS (SS SZ)) hlist
+-- hlist2 :: HList '[Bool, [Char]]
+--
+-- >>> let hlist3 = htake (SS (SS (SS (SS (SS SZ))))) hlist
+-- hlist3 :: HList '[Bool, [Char], Int]
 
 {- SEVEN -}
 
@@ -264,7 +267,6 @@ class Inject (x :: Type) (xs :: [Type]) where
 instance Inject x (x ': xs) where
   inject = Here
 
--- OVERLAPPABLE doesn't work.
 instance {-# INCOHERENT #-} Inject x xs => Inject x (z ': xs) where
   inject = There . inject
 
@@ -294,6 +296,9 @@ instance (Project x xs rs) => Project x (z ': xs) (z ': rs) where
 -- >>> project (Exercises.Proxy :: Exercises.Proxy String) (inject True :: Variant '[Int, String, Bool])
 -- Right ...
 
+
+
+
 {- EIGHT -}
 
 -- | It would be nice if I could update a particular index of an HList by
@@ -306,16 +311,28 @@ instance (Project x xs rs) => Project x (z ': xs) (z ': rs) where
 
 -- | Write the type class required to implement this function, along with all
 -- its instances and functional dependencies.
---class Update (n :: Nat) (f :: Type -> Type) (a :: Type) (xs :: [Type]) (rs :: [Type])
-class Update (n :: Nat) (a :: Type) (b :: Type) (xs :: [Type]) (rs :: [Type]) | n a b xs -> rs where
-  update :: SNat n -> (a -> b) -> HList xs -> HList rs
 
-instance Update 'Z x y (x ': xs) (y ': xs) where
-  update SZ f (HCons x xs) = HCons (f x) xs
+class Update (i :: Nat) (s :: [Type]) (t :: [Type]) (a :: Type) (b :: Type)
+    | s i -> a, t i -> b, i s b -> t, i t a -> s where
+  update :: SNat i -> (a -> b) -> HList s -> HList t
 
-instance {-# INCOHERENT #-} Update n a b xs ys => Update ('S n) a b (x ': xs) (x ': ys) where
-  update (SS n) f (HCons x xs) = HCons x (update n f xs)
--- >>> update SZ (length :: String -> Int) (HCons True (HCons ("Hello"::String) HNil))
+instance Update 'Z (a ': s) (b ': s) a b where
+  update SZ f (HCons a s) = HCons (f a) s
+
+instance (Update i s t a b)
+    => Update ('S i) (x ': s) (x ': t) a b where
+      update (SS i) f (HCons x s) = HCons x (update i f s)
+
+-- >>> let hlist = HCons True (HCons "Hello" HNil); hlist :: HList '[Bool, [Char]]
+-- >>> hlist2 = update (SS SZ) length hlist
+-- HCons True (HCons 5 HNil)
+
+
+-- The error messages are not the best. For example,
+--
+-- >>> hlist2 = update SZ length hlist
+
+
 
 
 {- NINE -}
